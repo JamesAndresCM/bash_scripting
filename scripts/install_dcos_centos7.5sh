@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+
+ip_address=$(ip route get 8.8.8.8 | awk 'NR==1 {print $NF}')
+
+function installPackages(){
+	packages=(epel-release tar xz unzip curl ipset chrony wget zlib-devel)
+	yum update -y;
+	yum install -y ${packages[@]}
+}
+
+#bad practice but...
+function disableSec(){
+   systemctl stop firewalld 2> /dev/null; systemctl disable firewalld 2> /dev/null;
+   sed -i 's/SELINUX=enforcing/SELINUX=disabled/g' /etc/selinux/config;
+   setenforce 0
+   echo 0 > /sys/fs/selinux/enforce
+}
+
+function installDocker(){
+cat > /etc/modules-load.d/overlay.conf <<'EOF'
+overlay
+EOF
+
+groupadd nogroup
+
+cat > /etc/yum.repos.d/docker.repo <<'EOF'
+[dockerrepo]
+name=Docker Repository
+baseurl=https://yum.dockerproject.org/repo/main/centos/7/
+enabled=1
+gpgcheck=1
+gpgkey=https://yum.dockerproject.org/gpg
+EOF
+
+mkdir -p /etc/systemd/system/docker.service.d 
+cat > /etc/systemd/system/docker.service.d/override.conf <<'EOF'
+[Service]
+ExecStart=
+ExecStart=/usr/bin/dockerd --storage-driver=overlay
+EOF
+yum install -y docker-engine-1.13.1
+
+systemctl daemon-reload
+systemctl enable docker
+systemctl start docker
+
+hostnamectl set-hostname mesos-single
+
+echo $ip_address mesos-single >> /etc/hosts
+
+yum install yum-plugin-versionlock -y
+yum versionlock docker-engine-1.13.
+systemctl enable chronyd && systemctl start chronyd
+timedatectl set-ntp 1
+}
+
+function genBootstrap(){
+mkdir -p /opt/dcos-setup && cd /opt/dcos-setup && curl -O https://downloads.dcos.io/dcos/stable/dcos_generate_config.sh
+mkdir -p genconf
+
+cat > genconf/ip-detect <<'EOF'
+#!/usr/bin/env bash
+set -o nounset -o errexit
+export PATH=/usr/sbin:/usr/bin:$PATH
+echo $(ip route get 8.8.8.8 | awk 'NR==1 {print $NF}')
+EOF
+
+
+chmod 755 genconf/ip-detect
+bash genconf/ip-detect
+
+cat > genconf/config.yaml <<'EOF'
+---
+bootstrap_url: http://mesos-single:8081       
+cluster_name: dcos
+exhibitor_storage_backend: static
+master_discovery: static
+master_list:
+- ip_address
+resolvers:
+- 8.8.4.4
+- 8.8.8.8
+EOF
+
+sed -i "s/ip_address/$ip_address/g" genconf/config.yaml
+bash dcos_generate_config.sh
+}
+
+function launchBootstrap(){
+docker pull nginx:alpine
+docker run -d --restart=unless-stopped -p 8081:80 -v /opt/dcos-setup/genconf/serve:/usr/share/nginx/html:ro --name=dcos-bootstrap-nginx nginx:alpine
+mkdir -p /tmp/dcos && cd /tmp/dcos && curl -O --noproxy '*' http://mesos-single:8081/dcos_install.sh && bash dcos_install.sh master
+}
+
+
+function installDCLI(){
+mkdir -p ~/bin && cd ~/bin && curl -sfO https://downloads.dcos.io/binaries/cli/linux/x86-64/0.4.17/dcos && chmod 755 ~/bin/dcos
+dcos config set core.dcos_url http://$ip_address
+}
+
+function startDCOS(){
+export opt_mesos=$(ls -1d /opt/mesosphere/packages/mesos--*)
+ln -s $opt_mesos/dcos.target.wants_slave/dcos-mesos-slave.service /etc/systemd/system
+ln -s $opt_mesos/dcos.target.wants_slave/dcos-mesos-slave.service /etc/systemd/system/dcos.target.wants
+systemctl start dcos-mesos-slave
+}
+
+function configureMarathon(){
+cd /opt/mesosphere
+cat > marathon-lb-internal.json <<'EOF'
+{ "marathon-lb":{ "name": "marathon-lb-internal", "instances": 1, "haproxy-group": "internal", "role": "", "bind-http-https": false} }
+EOF
+dcos auth login
+dcos package repo list
+dcos package describe --app --render marathon-lb --options=marathon-lb-internal.json > marathon-lb.json
+sed -i 's/"cpus": 2/"cpus": 0.1/' marathon-lb.json
+sed -i 's/ "mem": 1024/ "mem": 128/' marathon-lb.json
+}
+
+if (( $EUID == 0 )); then
+	installPackages
+	disableSec
+	installDocker
+	genBootstrap
+	launchBootstrap
+	installDCLI
+	sleep 180
+	startDCOS
+	configureMarathon
+else
+	echo "no root..."
+	exit 0
+fi
