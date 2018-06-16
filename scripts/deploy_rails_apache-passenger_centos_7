@@ -1,0 +1,167 @@
+crear swapfile
+dd if=/dev/zero count=0 seek=1G bs=1 of=/swap
+mkswap /swap
+swapon /swap
+
+crear user para administracion
+useradd -G wheel snake
+passwd snake
+
+zona horaria
+timedatectl set-timezone America/Santiago
+
+actualizar instalar paquetes adicionales y desabilitar selinux
+yum -y update
+yum -y install vim firewalld bash-completion git
+cp /etc/ssh/sshd_config{,.bak}
+sed -i 's/#Port 22/Port 2234/' /etc/ssh/sshd_config
+sed -i 's/#PermitRootLogin yes/PermitRootLogin no/' /etc/ssh/sshd_config
+sed -i 's/SELINUX=enforcing/SELINUX=disabled/' /etc/selinux/config
+systemctl start firewalld; systemctl enable firewalld; systemctl enable sshd;
+firewall-cmd --add-port=2234/tcp --permanent
+firewall-cmd --reload
+systemctl restart firewalld; systemctl restart sshd;
+reboot
+
+install rvm (no user root)
+curl -L https://get.rvm.io | bash -s stable
+source ~/.rvm/scripts/rvm
+rvm requirements
+rvm install 2.5.0
+rvm --default use ruby-2.5.0
+gem install bundler
+gem install rails -v 5.0.0
+
+instalar apache passenger
+sudo yum install -y epel-release pygpgme curl
+sudo curl --fail -sSLo /etc/yum.repos.d/passenger.repo https://oss-binaries.phusionpassenger.com/yum/definitions/el-passenger.repo
+sudo yum install -y mod_passenger
+
+habilitar puertos y servicio apache
+sudo systemctl start httpd; sudo systemctl enable httpd;
+sudo firewall-cmd --add-service=http --permanent
+sudo firewall-cmd --add-service=https --permanent
+sudo firewall-cmd --reload
+
+validar instalacion de passenger (si algo da error no continuar hasta solucionar problema...)
+passenger-config validate-install
+
+instalar memcached
+sudo yum -y install memcached
+sudo systemctl start memcached
+sudo systemctl enable memcached
+
+instalar y configurar postgresql
+sudo yum install postgresql-server postgresql-contrib
+sudo firewall-cmd --add-service=postgresql --permanent
+sudo firewall-cmd --reload
+sudo postgresql-setup initdb
+sudo cp /var/lib/pgsql/data/pg_hba.conf{,.bak}
+sudo sed -i 's/ident/md5/g' /var/lib/pgsql/data/pg_hba.conf
+sudo systemctl start postgresql
+sudo systemctl enable postgresql
+sudo -i -u postgres
+psql
+ALTER USER postgres WITH PASSWORD 'PASSWD';
+
+agregar usuario a grupo apache y crear directorio para proyectos
+sudo usermod -aG apache snake
+sudo mkdir -p /var/www/proyects
+sudo chown -R apache:apache proyects/
+
+instalar nodejs
+sudo yum install -y gcc-c++ make
+curl -sL https://rpm.nodesource.com/setup_10.x | sudo -E bash -
+sudo yum install nodejs -y
+
+setear environment de produccion
+echo "export RAILS_ENV=production" >> ~/.bashrc
+source ~/.bashrc
+
+instalar librerias postgresql
+sudo yum install postgresql-libs postgresql-devel
+
+crear proyecto simple
+cd /var/www/proyects 
+rails new test_rails -d postgresql
+rails g scaffold Car year:integer color:text
+
+agregar gema para environment
+echo "gem 'dotenv-rails'" >> Gemfile
+bundle install
+bundle exec rake secret RAILS_ENV=production
+
+setear key_base
+echo "export SECRET_KEY_BASE=322222......" >> ~/.bashrc
+rake assets:precompile
+
+crear environment file (root de la aplicacion)
+vim .env 
+POSTGRES_USER=USER
+POSTGRES_PASSWORD=PASSWD
+POSTGRES_HOST=localhost
+POSTGRES_DB=NAME_BD
+
+establecer permisos
+chmod 0600 .env
+
+editar archivo database
+vim config/database.yml
+
+default: &default
+  adapter: postgresql
+  encoding: unicode
+  username: <%= ENV['POSTGRES_USER'] %>
+  password: <%= ENV['POSTGRES_PASSWORD'] %>
+  timeout: 5000
+  template: template0
+  host: <%= ENV['POSTGRES_HOST'] %>
+  pool: <%= ENV.fetch("RAILS_MAX_THREADS") { 5 } %>
+
+production:
+  <<: *default
+  database: <%= ENV['POSTGRES_DB'] %>
+
+crear database y correr migracion
+rake db:setup
+rake db:migrate
+
+configurar virtualhosts apache
+cd /etc/httpd
+sudo mkdir sites-available
+sudo mkdir sites-enabled
+sudo sh -c 'echo "IncludeOptional sites-enabled/*.conf" >> /etc/httpd/conf/httpd.conf'
+
+RUBY-COMMAND para apache (la salida se debe agregar a virtualhost)
+passenger-config about ruby-command | grep -i command | head -n 1 | awk '{print $2}'
+
+
+sudo sh -c 'cat > /etc/httpd/sites-available/localhost.conf <<'EOF'
+<VirtualHost *:80>
+    ServerName localhost
+    DocumentRoot /var/www/proyects/test_rails/public
+
+    PassengerRuby RUBY-COMMAND
+
+    <Directory /var/www/proyects/test_rails/public>
+      Allow from all
+      Options -MultiViews
+      # Uncomment this if you're on Apache >= 2.4:
+      #Require all granted
+    </Directory>
+</VirtualHost>
+EOF'
+
+crear enlace directo
+sudo ln -sf /etc/httpd/sites-available/localhost.conf /etc/httpd/sites-enabled/
+
+crear ruta por default
+cd /var/www/proyects/test_rails
+
+rails g controller Home index
+agregar index a archivo de ruta
+vim config/routes.rb
+root to: 'home#index'
+
+reiniciar apache
+sudo systemctl restart httpd
