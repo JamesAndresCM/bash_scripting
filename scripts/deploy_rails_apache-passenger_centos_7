@@ -68,6 +68,7 @@ agregar usuario a grupo apache y crear directorio para proyectos
 sudo usermod -aG apache snake
 sudo mkdir -p /var/www/proyects
 sudo chown -R apache:apache proyects/
+sudo chmod -R 775 /var/www/projects
 
 instalar nodejs
 sudo yum install -y gcc-c++ make
