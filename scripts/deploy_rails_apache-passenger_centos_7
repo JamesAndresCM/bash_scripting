@@ -225,6 +225,15 @@ habilitar sidekiq
 sudo systemctl enable sidekiq
 sudo systemctl start sidekiq
 
+# optimize apache passenger
+passenger-status
+RESULT = (TOTAL_RAM * 0.75) / TOTAL_MEM_APP
+sudo vim /etc/httpd/conf/httpd.conf
+PassengerMaxPoolSize RESULT
+PassengerMinInstances RESULT
+
+sudo systemctl restart httpd
+
 
 #para deploy de angular
 crear dist
