@@ -1,0 +1,309 @@
+Español:
+ 
+# loadkeys es
+Latinoamérica:
+ 
+loadkeys la-latin1
+ 
+ Crear particiones
+#cfdisk
+tipo dos <---mbr
+gpt <---uefi
+ 
+/boot = 150 o 200 MB (Bootable)
+ 
+/ = 10-15 Gb.
+ 
+/home = lo que sea 
+ 
+Swap = 2GB (Linux Swap)
+ 
+Formatear:
+
+En /boot con ext2
+ 
+mkfs -t ext2 /dev/sdaX
+
+/ con ext4:
+ 
+mkfs -t ext4 /dev/sdaX
+
+
+/home con ext4:
+ 
+mkfs -t ext4 /dev/sdaX
+
+swap con mkswap:
+ 
+mkswap /dev/sdaX
+
+Activar swap:
+ 
+swapon /dev/sdaX
+ 
+Montar:
+ 
+/ en /mnt:
+ 
+mount /dev/sdaX /mnt
+
+Creamos directorios para las otras particiones:
+ 
+mkdir /mnt/boot
+mkdir /mnt/home
+
+Montar particiones:
+ 
+mount /dev/sdaX /mnt/boot
+mount /dev/sdaX /mnt/home
+ 
+VERIFICACIÓN DE CONEXIÓN DE RED
+ 
+Para conectarnos a una red inalámbrica o sino con cable de red:
+ 
+# wifi-menu
+Comprobar conexión:
+ 
+ping -c 3 www.google.com
+ 
+Para conectarnos a una red inalambrica con Network Manager:
+ 
+sudo nmcli dev wifi connect "SSID" password "contraseña"
+
+INSTALACIÓN DEL SISTEMA
+ 
+pacstrap /mnt base base-devel
+
+ 
+pacstrap /mnt grub-bios
+
+ 
+pacstrap /mnt networkmanager
+ 
+pacstrap /mnt os-prober <--------- para dual boot
+ 
+pacstrap /mnt xf86-input-synaptics <--- touchpad
+ 
+
+ 
+Generar el archivo fstab:
+ 
+genfstab -U -p /mnt >> /mnt/etc/fstab
+ 
+Agregar swap (si es que no lo hace solo..)
+vim /mnt/etc/fstab
+origen none swap defaults 0 0
+ 
+Efectuar Chroot y configurar el sistema base:
+ 
+arch-chroot /mnt
+
+Establecer nombre de equipo editar /etc/hostname:
+ 
+nano /etc/hostname
+  
+ln -s /usr/share/zoneinfo/America/Santiago /etc/localtime <--zona horaria
+ 
+Preferencias de localización:
+ 
+nano /etc/locale.conf
+ 
+LANG=es_CL.UTF-8
+ 
+ 
+Activar nuestra localización:
+ 
+eliminar el “#” al inicio de la línea de nuestra localización.
+ 
+nano /etc/locale.gen
+ 
+ 
+Generar localización:
+ 
+locale-gen
+ 
+Establecer la distribución de nuestro teclado:
+ 
+Crear /etc/vconsole.conf
+ 
+dentro poner:
+KEYMAP=la-latin1
+ 
+sudo update-ca-trust
+
+Instalación de Grub:
+ 
+
+grub-install /dev/sda
+ 
+Creamos el archivo grub.cfg:
+grub-mkconfig -o /boot/grub/grub.cfg
+ 
+Generar ramdisk:
+mkinitcpio -p linux
+ 
+Establecer contraseña de root:
+ 
+passwd
+ 
+Cerrar chroot:
+ 
+exit
+ 
+Desmontar particiones:
+ 
+umount /mnt/{boot,home,}
+ 
+Reiniciar sistema:
+ 
+reboot
+ 
+ACTIVAR NETWORK MANAGER
+ 
+systemctl start NetworkManager.service
+
+Activamos NetworkManager en el arranque:
+ 
+systemctl enable NetworkManager.service
+ 
+Crear usuario
+ 
+useradd -m -g users -G audio,lp,optical,storage,video,wheel,games,power,scanner -s /bin/bash user
+
+Colocar contraseña a nuestro usuario:
+ 
+passwd user
+ 
+ACTIVAR GRUPO WHEEL
+ 
+Editar /etc/sudoers:
+ 
+nano /etc/sudoers
+Eliminamos ‘#‘ al inicio de la linea: %wheel ALL=(ALL) ALL:
+ 
+ 
+Reiniciar equipo:
+ 
+reboot
+
+ Actualizamos el sistema:
+ 
+$ sudo pacman -Syu
+ 
+INSTALACIÓN DE XORG:
+sudo pacman -S xorg-server xorg-xinit xorg-utils xorg-server-utils
+
+INSTALACION DE MESA:
+sudo pacman -S mesa mesa-demos
+
+INSTALACION DE DRIVERS LIBRES NVIDIA
+sudo pacman -S xf86-video-nouveau
+
+INSTALACION DE INTEL
+sudo pacman -S xf86-video-intel
+
+PROBAR EL ENTORNO
+sudo pacman -S xorg-twm xorg-xclock xterm
+
+startx
+
+OPTIMUS DRIVER MAS INTEL 
+nvidia+intel (tecnologia OPTIMUS):
+pacman -S intel-dri xf86-video-intel bumblebee nvidia bbswitch primus
+
+agregar usuario al grupo de trabajo de bumblebee:
+gpasswd bumblebee -a $USER
+
+iniciamos el arranque del servicio y arrancamos el servicio:
+systemctl {enable,start} bumblebeed
+
+ 
+ 
+INSTALACIÓN DE GNOME
+ 
+sudo pacman -S gnome gnome-extra
+ 
+INSTALACIÓN DE COMPLEMENTOS
+ 
+Applet de bateria (para equipos portatiles):
+ 
+sudo pacman -S gnome-power-manager
+ 
+Herramienta para configurar la apariencia:
+ 
+sudo pacman -S gnome-tweak-tool
+ 
+Gestor de paquetes grafico:
+ 
+sudo pacman -S gnome-packagekit
+ 
+Para que GNOME compruebe automáticamente si hay actualizaciones,  instalamos las siguientes herramientas:
+ 
+sudo pacman -S gnome-settings-daemon-updates polkit-gnome
+ 
+ACTIVAR GDM:
+ 
+sudo systemctl enable gdm.service
+
+ 
+sudo reboot
+
+
+
+
+
+
+entorno grafico super basico
+archlinux-menus
+python-xdg
+openbox
+xorg-server xorg-xinit
+xorg-utils xorg-server-utils
+mesa mesa-demos
+xf86-video-vesa
+xorg-twm xorg-xclock
+xterm
+
+
+******************************
+para lvm
+modprobe -a dm-mod
+
+crear una particion para /boot (500mb) ext4 bootable
+
+crear volumen fisico
+pvcreate /dev/sdaX
+
+grupo de volumen
+vgcreate nombregrupo /dev/sdaX
+
+volumenes logicos
+lvcreate -C y -L 2GB nombregrupo -n nombrevolumenswap
+lvcreate -L 20GB nombregrupo -n nombrevolumenroot
+lvcreate -l +100%FREE nombregrupo -n nombrevolumenhome
+
+vgscan
+vgchange -ay
+
+formatear y montar
+el montaje es eje:
+mount /dev/mapper/VolGroup00-lvolroot /puntomontaje
+
+instalar la base del sistema
+
+asegurarse de comprobar las etiquetas de blkid y /mnt/etc/fstab
+y luego seguir con genfstab...
+
+llegando a mkinitcpio
+editar etc/mkinitcpio.conf
+HOOKS="base udev autodetect modconf block lvm2 filesystems keyboard fsck"
+luego mkinitcpio -p linux
+^^si da error se debe reinstalar linux .. pacman -S linux
+antes de instalar el grub
+editar /etc/lvm/lvm.conf
+use_lvmetad = 0
+
+luego instalar paquetes fuse grub lvm2 os-prober
+instalar el grub
+y finish...
+*****************************************
