@@ -1,0 +1,76 @@
+#master
+set hostname
+hostnamectl set-hostname 'k8s-master'
+
+disable selinux
+etenforce 0
+sed -i 's/SELINUX=enforcing/SELINUX=disabled/g' /etc/sysconfig/selinux
+
+firewall-rules
+firewall-cmd --permanent --add-port=6443/tcp
+firewall-cmd --permanent --add-port=2379-2380/tcp
+firewall-cmd --permanent --add-port=10250/tcp
+firewall-cmd --permanent --add-port=10251/tcp
+firewall-cmd --permanent --add-port=10252/tcp
+firewall-cmd --permanent --add-port=10255/tcp
+firewall-cmd --reload
+modprobe br_netfilter
+sysctl net.bridge.bridge-nf-call-iptables=1
+
+
+set hosts /etc/hosts
+192.168.1.X k8s-master
+192.168.1.X node1
+
+
+set repo to kubernetes
+cat <<EOF > /etc/yum.repos.d/kubernetes.repo
+[kubernetes]
+name=Kubernetes
+baseurl=https://packages.cloud.google.com/yum/repos/kubernetes-el7-x86_64
+enabled=1
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=https://packages.cloud.google.com/yum/doc/yum-key.gpg
+       https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+EOF
+
+
+install kubeadm and docker
+yum install kubeadm docker -y
+
+enable and start services
+systemctl restart docker && systemctl enable docker
+systemctl  restart kubelet && systemctl enable kubelet
+
+initialize master kubernetes
+kubeadm init
+
+mkdir -p $HOME/.kube
+cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+chown $(id -u):$(id -g) $HOME/.kube/config
+
+show status cluster and pods
+kubectl get nodes
+kubectl get pods --all-namespaces
+
+deploy network
+export kubever=$(kubectl version | base64 | tr -d '\n')
+kubectl apply -f "https://cloud.weave.works/k8s/net?k8s-version=$kubever"
+
+show status
+kubectl get nodes
+
+repeat instructions in node's exceptly kubeadm init, replace with kubeadm join....
+
+if exists problems turn off firewalld
+
+
+add args
+/etc/sysconfig/kubelet
+KUBELET_EXTRA_ARGS=--runtime-cgroups=/systemd/system.slice --kubelet-cgroups=/systemd/system.slice
+
+label nodes
+kubectl get nodes --show-labels
+kubectl label node slave-kube slave=allow
+kubectl label node slave-kube node-role.kubernetes.io/node=slave
