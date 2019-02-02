@@ -67,8 +67,8 @@ ALTER USER postgres WITH PASSWORD 'PASSWD';
 agregar usuario a grupo apache y crear directorio para proyectos
 sudo usermod -aG apache snake
 sudo mkdir -p /var/www/proyects
-sudo chown -R apache:apache proyects/
-sudo chmod -R 775 /var/www/projects
+sudo chown -R apache:apache /var/www/proyects
+sudo chmod -R 775 /var/www/proyects
 
 instalar nodejs
 sudo yum install -y gcc-c++ make
@@ -234,12 +234,121 @@ PassengerMinInstances RESULT
 
 sudo systemctl restart httpd
 
+###
+Deployment with capistrano (before vhost config)
 
-#para deploy de angular
-crear dist
+install gems
+group :development do
+  gem 'capistrano'
+  gem 'capistrano-bundler'
+  gem 'capistrano-rails'
+  gem 'capistrano-rvm', github: 'capistrano/rvm'
+end
+
+bundle
+
+install capistrano
+cap install STAGES=production
+
+###
+configure Capfile (set ruby ver)
+require "capistrano/setup"
+
+require "capistrano/deploy"
+
+require "capistrano/scm/git"
+install_plugin Capistrano::SCM::Git
+
+require "capistrano/rvm"
+require "capistrano/bundler"
+require "capistrano/rails"
+require "capistrano/ssh_doctor"
+set :rvm_type, :user
+set :rvm_ruby_version, 'ruby 2.5.1p57'
+
+Dir.glob("lib/capistrano/tasks/*.rake").each { |r| import r }
+
+###
+
+Configure deploy file , config/deploy.rb 
+get lock (bundle show and ver capistrano, set application, repo_url and user)
+
+lock "~> 3.11.0"
+
+set :application, "NAME_APP"
+set :repo_url, "REPO_URL"
+set :branch, "master"
+set :deploy_via, :copy
+set :user, 'USER'
+
+set :deploy_to, 'PATH_SERVER_APP'
+#set :linked_files, %w{config/database.yml}
+append :linked_files, "config/database.yml", "config/secrets.yml"
+append :linked_dirs, "log", "tmp/pids", "tmp/cache", "tmp/sockets", "public/system"
+#set :linked_dirs, %w{bin log tmp/pids tmp/cache tmp/sockets vendor/bundle public/system}
+
+namespace :deploy do
+  desc 'Restart application'
+  task :restart do
+    on roles(:app), in: :sequence, wait: 5 do
+      execute :touch, release_path.join('tmp/restart.txt')
+    end
+  end
+
+  after :publishing, 'deploy:restart'
+  after :finishing, 'deploy:cleanup'
+end
+
+
+namespace :deploy do
+  desc 'Restart application'
+  task :restart do
+    on roles(:app), in: :sequence, wait: 5 do
+     
+    end
+  end
+      
+  after :publishing, :restart
+  after :restart, :clear_cache do
+    on roles(:web), in: :groups, limit: 3, wait: 10 do
+ 
+    end
+  end
+end
+
+###
+
+Configure production file config/deploy/production.rb (set user and server ip)
+server 'SERVER_IP', user: 'USER', roles: %w{app db web}
+
+
+###
+create db and secrets file in /shared
+database.yml
+
+production:
+ host: 127.0.0.1
+ adapter: postgresql
+ encoding: unicode
+ database: DB
+ pool: 5
+ username: USER
+ password: PASS
+
+###
+ secrets.yml
+ production:
+  secret_key_base: SECRET_KEY
+
+###
+Finally deploy with capistrano
+
+cap production deploy
+
+#Deploy angular
+create dist
 ng build --prod
-crear virtualhost apuntando a la ruta
-crear .htaccess dentro de dist
+inside dist folder create .htaccess
 
 RewriteEngine on
 RewriteCond %{REQUEST_FILENAME} !-f
@@ -249,4 +358,5 @@ RewriteCond %{REQUEST_FILENAME} !-d
 RewriteCond %{REQUEST_URI} !\.(?:css|js|map|jpe?g|gif|png)$ [NC]
 RewriteRule ^(.*)$ /index.html?path=$1 [NC,L,QSA]
 
-reiniciar apache...
+restart httpd
+systemctl restart httpd
